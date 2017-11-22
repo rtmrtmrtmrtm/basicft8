@@ -2,15 +2,15 @@
 
 # <h4>Introduction</h4>
 
-# This is a basic demodulator for Franke and Taylor's FT8 digital
-# mode. This software is as simple as can be in order to introduce
-# interested readers to the basics of receiving FT8, and perhaps to
-# form a starting point for improved home-brew demodulators.
-
-# This page interleaves explanatory text with Python code. You can
-# find the Python code alone at XXX. To run the code you'll need
-# Python 2.7, the numpy Python module, the wave Python module, and the
-# pyaudio Python module.
+# This is a primitive demodulator for Franke and Taylor's FT8 digital
+# mode, interleaved with an explanation of the code.
+# I hope some readers will find it interesting and perhaps use
+# the code as a starting point for improved home-brew demodulators.
+# You can
+# find the Python code alone at
+# <a href="https://github.com/rtmrtmrtmrtm/basicft8">https://github.com/rtmrtmrtmrtm/basicft8</a>.
+# This page is
+# <a href="http://www.rtmrtm.org/basicft8/">http://www.rtmrtm.org/basicft8/</a>.
 
 # <h4>FT8 Summary</h4>
 
@@ -361,16 +361,13 @@ class FT8:
     # fairly generic (the sound card and .wav file readers, and the
     # LDPC decoder). The remaining code is lightly annotated.
 
-    # Open a sound card for input. Change cardno to select the card.
+    # Open the default sound card for input.
 
     def opencard(self):
-        cardno = 2 ## input sound card number
         self.rate = 12000
         self.pya = pyaudio.PyAudio()
-        info = self.pya.get_device_info_by_index(cardno) 
-        print "using sound card %d: %s" % (cardno, info['name'])
         self.card = self.pya.open(format=pyaudio.paInt16,
-                                  input_device_index=cardno,
+                                  ## input_device_index=XXX,
                                   channels=1,
                                   rate=self.rate,
                                   output=False,
