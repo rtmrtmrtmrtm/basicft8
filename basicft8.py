@@ -2,15 +2,12 @@
 
 # <h4>Introduction</h4>
 
-# This is a description of a primitive demodulator for Franke and Taylor's FT8 digital
-# mode, interleaved with the code.
-# I hope some readers will find it interesting and perhaps use
-# the code as a starting point for improved home-brew demodulators.
-# You can
-# find the Python code alone at
+# This document explains the inner workings of a program that
+# demodulates Franke and Taylor's FT8 digital mode. I hope the
+# explanation helps others write their own home-brew FT8 software,
+# perhaps using this code as a starting point. You can find the
+# program's Python source code at
 # <a href="https://github.com/rtmrtmrtmrtm/basicft8">https://github.com/rtmrtmrtmrtm/basicft8</a>.
-# This page is
-# <a href="http://www.rtmrtm.org/basicft8/">http://www.rtmrtm.org/basicft8/</a>.
 
 # <h4>FT8 Summary</h4>
 
@@ -105,6 +102,13 @@
 # which is the FT8 tone spacing. Thus the demodulator forms its matrix
 # of bins by handing the audio samples, 1920 at a time, to FFTs, and
 # stacking the results to form a matrix.
+
+# This program catches only a fraction of the FT8 signals that wsjt-x
+# can decode. Perhaps the most serious deficiency is that the program
+# only works well for signals that arrive aligned near 1920-sample
+# boundaries in time, and near 6.25-Hz boundaries in frequency. It
+# would be more clever to look for signals on half- or quarter-bin
+# boundaries, in time and in frequency.
 
 # <h4>Code</h4>
 
