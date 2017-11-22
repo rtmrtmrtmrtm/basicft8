@@ -2,8 +2,8 @@
 
 # <h4>Introduction</h4>
 
-# This is a primitive demodulator for Franke and Taylor's FT8 digital
-# mode, interleaved with an explanation of the code.
+# This is a description of a primitive demodulator for Franke and Taylor's FT8 digital
+# mode, interleaved with the code.
 # I hope some readers will find it interesting and perhaps use
 # the code as a starting point for improved home-brew demodulators.
 # You can
@@ -14,26 +14,27 @@
 
 # <h4>FT8 Summary</h4>
 
-# An FT8 signal starts at 0.5, 15.5, 30.5, or 45.5 seconds past the
-# minute, and lasts 12.64 seconds. It consists of 79 symbols, each
-# 0.16 seconds long. Each symbol is a single steady tone. For any
-# given signal there are eight possible tones: this is 8-FSK.
-# The tone spacing is 6.25 Hertz.
+# An FT8 cycle starts every 15 seconds, at 0, 15, 30 and 45 seconds
+# past the minute. An FT8 signal starts 0.5 seconds into a cycle and
+# lasts 12.64 seconds. It consists of 79 symbols, each 0.16 seconds
+# long. Each symbol is a single steady tone. For any given signal
+# there are eight possible tones (i.e. it is 8-FSK). The tone spacing
+# is 6.25 Hertz.
 
-# There are three sequences of seven fixed tones embedded in
-# each signal, to help receivers detect the presence of a signal
-# and to estimate where it starts in time and in frequency.
-# Each fixed sequence is called a Costas synchronization array,
-# and consists of tones 2, 5, 6, 0, 4, 1, and 3.
+# To help receivers detect the presence of signals and to estimate
+# where they start in time and in frequency, there are three sequences
+# of seven fixed tones embedded in each signal. Each fixed sequence is
+# called a Costas synchronization array, and consists of the tone
+# sequence 2, 5, 6, 0, 4, 1, and 3.
 
-# There are 58 symbols that carry information (79 minus the 21 Costas
-# array symbols). Each symbol conveys 3 bits (since it's 8-FSK),
+# The other 58 symbols carry information.
+# Each symbol conveys 3 bits (since it's 8-FSK),
 # yielding 174 bits. The 174 bits are a "codeword", which must be
 # given to a Low Density Parity Check (LDPC) decoder to yield 87 bits.
 # The LDPC decoder uses the extra bits to correct bits corrupted by
 # noise, interference, fading, etc. The 87 bits consists of 75 bits of
 # "packed message" plus a 12-bit Cyclic Redundancy Check (CRC). The
-# CRC is an extra check to ensure that the output of the LDPC decoder
+# CRC is an extra check to verify that the output of the LDPC decoder
 # really is a proper message.
 
 # The 75-bit packed message can have one of a few formats. The most
@@ -41,59 +42,69 @@
 # either a signal strength report or a grid square (packed into 16
 # bits).
 
-# People use FT8 in one of a number of 2500-Hertz bands, for example
-# starting at 14.074 MHz. There is space for many FT8 signals in each
-# band (since each signal is about 50 Hz wide), and people send
-# signals at more or less random frequencies within a band. This
-# demodulator is intended to take upper-sideband audio from a receiver
-# set up so that the audio includes one 2500-Hertz FT8 band. There may
-# be many signals in the audio; the demodulator does not initially
-# know the frequencies of any of them, so it must search in the 2500-Hertz
-# spectrum. While it can count on signals starting at roughly the
-# correct times (e.g. 0.5 seconds past the minute), differences in
-# clock settings at senders and at the receiver mean that the
-# demodulator must search in time as well as frequency.
+# This demodulator uses upper-side-band audio from a receiver, so it
+# sees a roughly 2500-Hz slice of spectrum. An FT8 signal is 50 Hz
+# wide (8 tones times 6.25 Hz per tone), and there may be many signals
+# in the audio. The demodulator does not initially know the
+# frequencies of any of them, so it must search in the 2500 Hz. While
+# most signals start roughly 0.5 seconds into a cycle, differences in clock
+# settings mean that the demodulator must search in time as well as
+# frequency.
 
-# To illustrate, here is a spectrogram containing three FT8 signals.
-# Time progresses along the x-axis, starting exactly on the minute,
-# and ending about 13.5 seconds after the minute. The middle signal
-# starts a little early. The y-axis shows a slice of about 800 Hz.
-# Each signal visibly shifts frequency as it progresses from one
-# 8-FSK symbol to the next. With a bit of imagination you can see that
-# the signals have identical first and last runs of seven symbols;
-# these are the Costas arrays.
+# To illustrate, here is a spectrogram from an FT8 cycle. Time
+# progresses along the x-axis, starting at the beginning of a cycle,
+# and ending about 13.5 seconds later. The y-axis shows a slice of
+# about 800 Hz. Three signals are visible; the middle signal starts a
+# little early. Each signal visibly shifts frequency as it progresses
+# from one 8-FSK symbol to the next. With a bit of imagination you can
+# see that the signals have identical first and last runs of seven
+# symbols; these are the Costas arrays.
 
 # <img src="ft8example.jpg">
 
+# Here's a summary of the stages in which an FT8 sender constructs a signal,
+# along with the size of each stage's output.
+# <ul>
+# <li> Start with a message like CQ AB1HL FN42.
+# <li> Pack the message: 72 bits.
+# <li> Add 3 zero bits: 75 bits.
+# <li> Add a CRC-12: 87 bits.
+# <li> Encode with LDPC: 174 bits.
+# <li> Turn each 3 bits into a symbol number from 0 to 8: 58 symbol numbers.
+# <li> Add three 7-symbol Costas arrays: 79 symbol numbers.
+# <li> Generate 8-FSK audio: 12.64 seconds of audio.
+# <li> Send the audio to a radio transmitter.
+# </ul>
+
 # <h4>Demodulator Strategy</h4>
 
-# This demodulator views the 13+ seconds of 2500-Hz-wide audio as a
-# two-dimensional matrix of "bins". There are about 400 bins on the
-# frequency axis, corresponding to 6.25-Hz FSK tones. There are
-# somewhat more than 79 bins along the time axis, corresponding to
-# symbol times. The demodulator searches for Costas synchronization
-# arrays in this matrix. For each plausible-looking triplet of Costas
-# arrays at the same base frequency and with the right spacing in
-# time, the demodulator extracts bits from FSK symbols and sees if the
-# LDPC decoder can interpret the bits as a correct codeword. If LDPC
-# succeeds, and the CRC is correct, the demodulator unpacks the
-# message and prints it.
+# This demodulator looks at an entire FT8 cycle's worth of audio
+# samples at a time. It views the audio as a two-dimensional matrix of
+# "bins", with frequency in 6.25-Hz units along one axis, and time in
+# 0.16-second symbol-times along the other axis. Much like the
+# spectrogram image above.  Each bin corresponds to a
+# single tone lasting for one symbol time. Each bin's value indicates
+# how much signal energy was received at the corresponding frequency
+# and time. This arrangement is convenient because, roughly speaking,
+# one can demodulate 8-FSK by seeing which of the relevant 8 bins is
+# strongest during each symbol time. The demodulator searches for
+# Costas synchronization arrays in this matrix. For each
+# plausible-looking triplet of Costas arrays at the same base
+# frequency and with the right spacing in time, the demodulator
+# extracts bits from FSK symbols and sees if the LDPC decoder can
+# interpret the bits as a correct codeword. If the LDPC succeeds, and the
+# CRC is correct, the demodulator unpacks the message and prints it.
 
-# The demodulator turns 13+ seconds of audio into bins by repeated use
-# of Fast Fourier Transforms (FFTs). Each FFT takes N audio samples
-# and returns (N/2)+1 output bins, each containing the strength of a
-# different frequency within the audio samples. The FFT output bins
-# correspond to frequencies at multiples of samplerate/N. Thus, if the
-# sound card is running at 12000 samples/second, and we invoke FFT on
-# blocks of 1920 samples, each bin in each FFT's result corresponds to
-# one 6.25-Hz range of frequencies (i.e. 12000/1920). Note also that
-# 1920 samples corresponds to 0.16 seconds at 12000 samples/second
-# (1920/12000=0.16). That is, with the combination of 12000 and 1920,
-# each FFT bin exactly corresponds to one FT8 tone, both in frequency
-# span and in symbol time. This is a very convenient aspect of FT8's
-# design (and of course it is intentional). Thus the demodulator forms
-# its matrix of bins by handing the audio samples, 1920 at a time, to
-# FFTs, and concatenating the results to form a matrix.
+# The demodulator requires an audio sample rate of 12000
+# samples/second. It turns the audio into bins by
+# repeated use of Fast Fourier Transforms (FFTs), one per symbol time.
+# A symbol time is 1920 samples. Each FFT takes 1920 audio samples and
+# returns (1920/2)+1 output bins, each containing the strength of a
+# different frequency within those audio samples. The FFT output bins
+# correspond to frequencies at multiples of 12000/1920, or 6.25 Hz,
+# which is the FT8 tone spacing. Thus the demodulator forms its matrix
+# of bins by handing the audio samples, 1920 at a time, to FFTs, and
+# stacking the results to form a matrix.
 
 # <h4>Code</h4>
 
@@ -132,20 +143,20 @@ import threading
 
 class FT8:
 
-    # The process() function initiates the work of demodulation. It is
-    # called with at least 13.64 seconds of audio samples at 12,000
+    # The process() function demodulates one FT8 cycle. It is
+    # called with 13.64 seconds of audio at 12,000
     # samples/second: samples is a numpy array with about 164,000
     # elements. 13.64 seconds is enough samples for a whole signal
     # (12.64 seconds) plus half a second of slop at the start and end.
-    # process() takes at most ten seconds so that it doesn't overlap
+    # process() computes for at most ten seconds so that it doesn't overlap
     # with the call for the next 15-second FT8 cycle; the call to
-    # time.time() remembers the starting wall-clock time in seconds.
+    # time.time() records the starting wall-clock time in seconds.
 
     def process(self, samples):
         ## set up to quit after 10 seconds.
         t0 = time.time()
 
-        # How many symbol times in samples? // is Python's integer division.
+        # How many symbols does samples hold? // is Python's integer division.
         # self.block is 1920, the number of samples in one FT8 symbol.
 
         nblocks = len(samples) // self.block ## number of symbol times in samples[]
@@ -153,8 +164,8 @@ class FT8:
         # Perform one FFT for each symbol-time's worth of samples.
         # Each FFT returns an array with nbins elements. The matrix m
         # will hold the results; m[i][j] holds the strength of
-        # frequency j*6.25 Hz during the symbol-time that started at
-        # i*0.16 seconds. The FFT returns complex numbers that indicate
+        # frequency j*6.25 Hz during the i'th symbol-time.
+        # The FFT returns complex numbers that indicate
         # phase as well as amplitude; the abs() essentially throws away
         # the phase.
 
@@ -162,11 +173,11 @@ class FT8:
         ## each FFT bin corresponds to one FSK tone.
         nbins = (self.block // 2) + 1        ## number of bins in FFT output
         m = numpy.zeros((nblocks, nbins))
-        for bi in range(0, nblocks):
-            block = samples[bi*self.block:(bi+1)*self.block]
+        for i in range(0, nblocks):
+            block = samples[i*self.block:(i+1)*self.block]
             bins = numpy.fft.rfft(block)
             bins = abs(bins)
-            m[bi] = bins
+            m[i] = bins
 
         # Much of this code deals with arrays of numbers. Thus block
         # above holds the 1920 samples of a single symbol time, bins
@@ -174,7 +185,7 @@ class FT8:
         # assignment copies bins to a slice through the m matrix.
 
         # Next the code will look for Costas arrays in m. A Costas
-        # array in m looks like a 7x8 sub-matrix with exactly one
+        # array in m looks like a 7x8 sub-matrix with one
         # high-valued element in each column, and the other elements
         # with low values. The high-valued elements correspond to the
         # i'th tone of the Costas array. We'll find Costas arrays in m
@@ -184,7 +195,7 @@ class FT8:
         # element. The sum over the product's elements will be large
         # if we've found a real Costas sync array, and close to zero
         # otherwise. The reason to use -1/7 rather than -1 is to avoid
-        # having the results dominated by the sum of very large number
+        # having the results dominated by the sum of the large number
         # of elements that should be low-valued.
 
         ## prepare a template of the Costas sync array
@@ -196,7 +207,8 @@ class FT8:
             costas_matrix[i][costas_symbols[i]] = 1
 
         # Now examine every symbol-time and FFT frequency bin at which
-        # a signal could start (there are a few thousand of them). Sum
+        # a signal could start (there are a few thousand of them). The
+        # signal variable holds the 79x8 matrix for one signal. Sum
         # the strengths of the Costas arrays for that potential
         # signal, and append the strength to the candidates array.
         # candidates will end up holding the likelihood of there being
@@ -208,14 +220,14 @@ class FT8:
         for bi in range(0, nbins-8):
             ## a signal's worth of FFT bins -- 79 symbols, 8 FSK tones.
             for si in range(0, nblocks - 79):
-                bins = m[si:si+79,bi:bi+8]
+                signal = m[si:si+79,bi:bi+8]
                 strength = 0.0
-                strength += numpy.sum(bins[0:7,0:8] * costas_matrix)
-                strength += numpy.sum(bins[36:43,0:8] * costas_matrix)
-                strength += numpy.sum(bins[72:79,0:8] * costas_matrix)
+                strength += numpy.sum(signal[0:7,0:8] * costas_matrix)
+                strength += numpy.sum(signal[36:43,0:8] * costas_matrix)
+                strength += numpy.sum(signal[72:79,0:8] * costas_matrix)
                 candidates.append( [ bi, si, strength ] )
 
-        # Sort the candidates, strongest first.
+        # Sort the candidate signals, strongest first.
 
         ## sort the candidates, strongest Costas sync first.
         candidates = sorted(candidates, key = lambda e : -e[2])
@@ -223,8 +235,10 @@ class FT8:
         # Now we'll look at the candidate start positions, strongest
         # first, and see if the LDPC decoder can extract a signal from
         # each of them. This is the second pass in a two-pass scheme:
-        # first look for plausible Costas sync arrays, then try LDPC
-        # decoding on just the candidates that look strong. Why two
+        # the first pass is the code above that looks
+        # for plausible Costas sync arrays, and the second pass is the
+        # code below that tries LDPC
+        # decoding on the strongest candidates. Why two
         # passes, rather than simply trying LDPC decoding at
         # each possible signal start position? Because LDPC decoding
         # takes a lot of CPU time, and in our 10-second budget there's
@@ -235,11 +249,11 @@ class FT8:
         # LDPC decoding for start positions that have a good chance of
         # actually being signals.
 
-        # The assignment to bins extracts the 79x8 bins that
-        # correspond to this candidate signal. bins[3][4] contains the
-        # strength of the 4th FSK tone in symbol 3, and if it is the
-        # highest among the 8 elements of bins[3], then (very likely)
-        # the 3rd symbol's value is 4 (yielding the three bits 100).
+        # The assignment to signal extracts the 79x8 bins that
+        # correspond to this candidate signal. signal[3][4] contains the
+        # strength of the 4th FSK tone in symbol 3. If it is the
+        # highest among the 8 elements of signal[3], then
+        # symbol 3's value is probably 4 (yielding the three bits 100).
         # The call to process1() does most of the remaining work (see
         # below). This loop quits after 10 seconds.
 
@@ -252,9 +266,9 @@ class FT8:
             bi = cc[0]
             si = cc[1]
             ## a signal's worth of FFT bins -- 79 symbols, 8 FSK tones.
-            bins = m[si:si+79,bi:bi+8]
+            signal = m[si:si+79,bi:bi+8]
 
-            msg = self.process1(bins)
+            msg = self.process1(signal)
 
             if msg != None:
                 bin_hz = self.rate / float(self.block)
@@ -264,8 +278,8 @@ class FT8:
 
     # fsk_bits() is a helper function that turns a 58x8 array of tone
     # strengths into 58*3 bits. It does this by deciding which tone is
-    # strongest for each of the 58 symbols. s58 holds the index of the
-    # strongest tone. bits3 generates each symbol's three bits, and
+    # strongest for each of the 58 symbols. s58 holds, for each symbol, the index of the
+    # strongest tone at that symbol time. bits3 generates each symbol's three bits, and
     # numpy.concatenate() flattens them into 174 bits.
 
     ## given 58 symbols worth of 8-FSK tones,
@@ -286,7 +300,7 @@ class FT8:
         return a174
 
     # process() calls process1() for each candidate signal.
-    # m79[0..79][0..8] holds the tone strengths for each received
+    # m79[0..79][0..8] holds the eight tone strengths for each received
     # symbol.
 
     ## m79 is 79 8-bucket mini FFTs, for 8-FSK demodulation.
@@ -298,41 +312,43 @@ class FT8:
 
         m58 = numpy.concatenate( [ m79[7:36], m79[43:72] ] )
 
-        # Demodulate symbols into bits.
+        # Demodulate the 58 8-FSK symbols into 174 bits.
 
         a174 = self.fsk_bits(m58)
 
         # The LDPC decoder wants log-likelihood estimates, indicating
         # how sure we are of each bit's value. This code isn't clever
-        # enough to do this, so we'll fake the estimates. 4.6 indicates
+        # enough to produce estimates, so it fakes them. 4.6 indicates
         # a zero, and -4.6 indicates a one.
 
         ## turn hard bits into 0.99 vs 0.01 log-likelihood,
         ## log_e( P(bit=0) / P(bit=1) )
         two = numpy.array([ 4.6, -4.6 ], dtype=numpy.int32)
-        ll174 = two[a174]
+        log174 = two[a174]
 
-        # Call the LDPC decoder with the 174-bit codeword. The LDPC
+        # Call the LDPC decoder with the 174-bit codeword. The 
         # decoder has a big set of parity formulas that must be
         # satisfied by the bits in the codeword. Usually the codeword
         # contains errored bits, due to noise, interference, fading,
         # and badly aligned symbol sampling. The decoder tries to
         # guess which bits are incorrect, and flips them in an attempt
-        # to cause the parity formulas to be satisfied. After a while
-        # it gives up. If it succeeds, it returns 87 bits containing
-        # the original message (handed to the sender's LDPC encoder).
+        # to cause the parity formulas to be satisfied.
+        # If it succeeds, it returns 87 bits containing
+        # the original message (the bits the sender handed its LDPC encoder).
+        # Otherwise, after flipping
+        # different combinations of bits for a while, it gives up.
 
         ## decode LDPC(174,87)
-        a87 = ldpc_decode(ll174)
+        a87 = ldpc_decode(log174)
 
-        # A zero-length returned array indicates failure.
+        # A zero-length result array indicates that the decoder failed.
 
         if len(a87) == 0:
             ## failure.
             return None
 
         # The LDPC decode succeeded! FT8 double-checks the result with
-        # a CRC, though in practice this rarely fails if the LDPC
+        # a CRC. The CRC rarely fails if the LDPC
         # decode succeeded.
 
         ## check the CRC-12
@@ -344,7 +360,7 @@ class FT8:
             return None
 
         # The CRC succeeded, so it's highly likely that a87 contains
-        # a correct message. Drop the 12 CRC bits and unpack it into
+        # a correct message. Drop the 12 CRC bits and unpack the remainder into
         # a human-readable message, which process() will print.
 
         ## a87 is 75 bits of msg and 12 bits of CRC.
@@ -356,10 +372,10 @@ class FT8:
 
     # That's the end of the guts of the FT8 demodulator!
 
-    # There is lots more code, but it's either not really part of
+    # The remaining code is either not really part of
     # demodulation (e.g. the FT8 message format unpacker), or it's
     # fairly generic (the sound card and .wav file readers, and the
-    # LDPC decoder). The remaining code is lightly annotated.
+    # LDPC decoder).
 
     # Open the default sound card for input.
 
@@ -373,12 +389,12 @@ class FT8:
                                   output=False,
                                   input=True)
 
-    # Read samples from the sound card. Each time a full cycle's worth
-    # of samples have accumulated, pass them to process(). gocard()
-    # calls process() in a separate thread, because we need to read
-    # the samples for the next cycle while process() is decoding.
-    # gocard() takes care to pass samples to process that start at a
-    # cycle boundary.
+    # gocard() reads samples from the sound card. Each time it
+    # accumulates a full FT8 cycle's worth of samples,
+    # starting at a cycle boundary, it passes them
+    # to process(). gocard() calls process() in a separate thread,
+    # because it needs to read samples for the next cycle while
+    # process() is decoding.
 
     def gocard(self):
         buffered = numpy.array([], dtype=numpy.int16)
@@ -420,35 +436,20 @@ class FT8:
         return 15.0 * (dt - int(dt))
 
     # This program can read a .wav file instead of a sound card. The
-    # .wav file must contain at least 13.64 seconds' of samples at
-    # 12000 samples/second, starting at a 15-second interval. That is
-    # the format that wsjt-x produces when it records audio.
+    # .wav file must contain one FT8 cycle at 12000 samples/second.
+    # That is the format that wsjt-x produces when it records audio.
 
     def openwav(self, filename):
         self.wav = wave.open(filename)
-        self.wav_channels = self.wav.getnchannels()
-        self.wav_width = self.wav.getsampwidth()
         self.rate = self.wav.getframerate()
         assert self.rate == 12000
+        assert self.wav.getnchannels() == 1 ## one channel
+        assert self.wav.getsampwidth() == 2 ## 16-bit audio
 
     def readwav(self, chan):
-        z = self.wav.readframes(8192)
-        if self.wav_width == 1:
-            zz = numpy.fromstring(z, numpy.int8)
-        elif self.wav_width == 2:
-            if (len(z) % 2) == 1:
-                return numpy.array([])
-            zz = numpy.fromstring(z, numpy.int16)
-        else:
-            sys.stderr.write("oops wave_width %d" % (self.wav_width))
-            sys.exit(1)
-        if self.wav_channels == 1:
-            return zz
-        elif self.wav_channels == 2:
-            return zz[chan::2] ## chan 0/1 => left/right
-        else:
-            sys.stderr.write("oops wav_channels %d" % (self.wav_channels))
-            sys.exit(1)
+        frames = self.wav.readframes(8192)
+        samples = numpy.fromstring(frames, numpy.int16)
+        return samples
 
     def gowav(self, filename, chan):
         self.openwav(filename)
@@ -460,25 +461,11 @@ class FT8:
             bufbuf.append(buf)
         samples = numpy.concatenate(bufbuf)
 
-        ## trim trailing zeroes that wsjt-x adds to .wav files.
-        i = len(samples)
-        while i > 1000 and numpy.max(samples[i-1:]) == 0.0:
-            if numpy.max(samples[i-1000:]) == 0.0:
-                i -= 1000
-            elif numpy.max(samples[i-100:]) == 0.0:
-                i -= 100
-            elif numpy.max(samples[i-10:]) == 0.0:
-                i -= 10
-            else:
-                i -= 1
-        samples = samples[0:i]
-
         self.process(samples)
 
-    # This is the code to unpack FT8 messages into human-readable
+    # This code unpacks FT8 messages into human-readable
     # form. At a high level it interprets 72 bits of input as two call
-    # signs and a grid or signal report. The details are influenced by
-    # this code's original use with JT65.
+    # signs and a grid or signal report.
 
     def unpack(self, a72):
         ## re-arrange the 72 bits into a format like JT65,
@@ -665,15 +652,13 @@ class FT8:
         self.start_time = now - gm.tm_sec
 
 # Now comes the LDPC decoder. The decoder is driven by tables that
-# describe the parity checks that the codeword must satify -- the sets
-# of bits that must exclusive-or to zero. These tables are copied from
-# the WSJT-X source.
+# describe the parity checks that the codeword must satify.
 
 # Each row of Nm describes one parity check.
 # Each number is an index into the codeword (1-origin).
 # The codeword bits mentioned in each row must exclusive-or to zero.
 # There are 87 rows.
-# Nm is a copy of WSJT-X's bpdecode174.f90.
+# Nm is a copy of wsjt-x's bpdecode174.f90.
 Nm = [
     [ 1,   30,  60,  89,   118,  147,  0 ],
     [ 2,   31,  61,  90,   119,  147,  0 ],
@@ -769,7 +754,7 @@ Nm = [
 # The numbers indicate which three parity
 # checks (rows in Nm) refer to the codeword bit.
 # 1-origin.
-# Mn is a copy of WSJT-X's bpdecode174.f90.
+# Mn is a copy of wsjt-x's bpdecode174.f90.
 Mn = [
   [ 1, 25, 69 ],
   [ 2, 5, 73 ],
@@ -949,6 +934,7 @@ Mn = [
 
 # This is an indirection table that moves a
 # codeword's 87 systematic (message) bits to the end.
+# It's copied from the wsjt-x source.
 colorder = [
   0, 1, 2, 3, 30, 4, 5, 6, 7, 8, 9, 10, 11, 32, 12, 40, 13, 14, 15, 16,
   17, 18, 37, 45, 29, 19, 20, 21, 41, 22, 42, 31, 33, 34, 44, 35, 47,
@@ -968,7 +954,7 @@ colorder = [
 # return an 87-bit plain text, or zero-length array.
 # The algorithm is the sum-product algorithm
 # from Sarah Johnson's Iterative Error Correction book.
-# codeword[i] = log ( P(x=0) / P(x=1) )
+## codeword[i] = log ( P(x=0) / P(x=1) )
 def ldpc_decode(codeword):
     ## 174 codeword bits
     ## 87 parity checks
@@ -1060,7 +1046,7 @@ def ldpc_decode(codeword):
     return numpy.array([])
 
 # A helper function to decide if
-# a 174-bit codeword pass the LDPC parity checks.
+# a 174-bit codeword passes the LDPC parity checks.
 def ldpc_check(codeword):
     for e in Nm:
         x = 0
@@ -1071,12 +1057,12 @@ def ldpc_check(codeword):
             return False
     return True
 
-# Now the CRC-12.
-# This is a copy of Evan Sneath's code, from
-# https://gist.github.com/evansneath/4650991
-
 # The CRC-12 polynomial, copied from wsjt-x's 0xc06.
 crc12poly = [ 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0 ]
+
+# crc() is a copy of Evan Sneath's code, from
+# https://gist.github.com/evansneath/4650991 .
+# div is crc12poly.
 
 ##
 ##
@@ -1089,10 +1075,9 @@ crc12poly = [ 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0 ]
 ##
 ## 0xc06 is really 0x1c06 or [ 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0 ]
 ##
-def crc(msg, div, code=None):
+def crc(msg, div):
     ## Append the code to the message. If no code is given, default to '000'
-    if code is None:
-        code = numpy.zeros(len(div)-1, dtype=numpy.int32)
+    code = numpy.zeros(len(div)-1, dtype=numpy.int32)
     assert len(code) == len(div) - 1
     msg = numpy.append(msg, code)
 
