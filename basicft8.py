@@ -404,7 +404,7 @@ class FT8:
         buffered = numpy.array([], dtype=numpy.int16)
         while True:
             chunk = self.card.read(1024)
-            chunk = numpy.fromstring(chunk, dtype=numpy.int16)
+            chunk = numpy.frombuffer(chunk, dtype=numpy.int16)
             buffered = numpy.append(buffered, chunk)
 
             ## do we have all the samples for a full cycle?
@@ -452,7 +452,7 @@ class FT8:
 
     def readwav(self, chan):
         frames = self.wav.readframes(8192)
-        samples = numpy.fromstring(frames, numpy.int16)
+        samples = numpy.frombuffer(frames, numpy.int16)
         return samples
 
     def gowav(self, filename, chan):
